@@ -1,0 +1,13 @@
+# AI Assisted Project App
+
+A Flask backend for refining user‐uploaded images and generating project breakdowns via Google Vertex AI (Gemini).
+
+## Setup
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+export FLASK_APP=app.py
+flask run
+
