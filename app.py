@@ -16,10 +16,27 @@ from resources.image import blp as ImageBlueprint
 from resources.task import blp as TaskBlueprint
 
 from datetime import timedelta
+from flask_cors import CORS
 
 
 def create_app(db_url = None):
     app = Flask(__name__)
+
+
+    FRONTEND_URL = os.getenv("FRONTEND_URL")
+
+    CORS(
+        app,
+        resources={r"/*": {
+            "origins": [FRONTEND_URL],
+            "supports_credentials": True,
+            "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept"],
+            "expose_headers": ["Content-Type", "Authorization"],
+            "max_age": 86400
+        }},
+    )
+
 
     app.config["PROPAGATE_EXCEPTIONS"] = True
     app.config["API_TITLE"] = "ProjPool -- Project Database"
@@ -50,13 +67,16 @@ def create_app(db_url = None):
     # Expiry for full access tokens
     app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(hours = 3)
 
+    # Admin priviledges (not given yet)
+    '''
     @jwt.additional_claims_loader
     def add_claims_to_jwt(identity):
         # Look into database and see if user is admin
         # Just a rough example for now
-        if identity == str(2):
+        if identity == str(1):
             return {"is_admin": True}
         return {"is_admin": False}
+    '''
     
     # Whenever we receive a JWT, this function checks if it is inside blocklist
     # If returns True, the request is terminated (access is revoked)
@@ -71,7 +91,7 @@ def create_app(db_url = None):
     def revoked_token_callback(jwt_header, jwt_payload):
         return (
             jsonify(
-                {"decsription": "Token has been revoked", "error": "token_revoked"}
+                {"description": "Token has been revoked", "error": "token_revoked"}
             ),
             401
         )
