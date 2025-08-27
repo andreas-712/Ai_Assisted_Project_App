@@ -31,7 +31,7 @@ class ProjectListAndCreate(MethodView):
         current_user_id = get_jwt_identity()
         
         user = UserModel.query.get_or_404(current_user_id)
-        if user.projects.count() > MAX_USER_PROJECTS:
+        if user.projects.count() >= MAX_USER_PROJECTS:
             abort(400, message = f"Limit of {MAX_USER_PROJECTS} projects per user reached")
 
         project = ProjectModel(user_id = current_user_id, **project_data)
@@ -99,6 +99,7 @@ class ProjectResource(MethodView):
         try:
             db.session.add(project)
             db.session.commit()
+            return project
 
         except IntegrityError:
             db.session.rollback()

@@ -50,13 +50,13 @@ class UserSchema(PlainUserSchema):
 
 class LabelSchema(PlainLabelSchema):
     # Pass ID from Project client
-    project_id = fields.Int(required = True, load_only = True) 
+    project_id = fields.Int(required = False, load_only = True) 
      # To show which project a label belongs to
     project = fields.Nested(PlainProjectSchema(), dump_only = True)
     # Refined label 1-1 relation, can show its refined label
     refinements = fields.List(fields.Nested(PlainRefinedLabelSchema(), dump_only = True))
     # For user decision whether they want generated label descriptions
-    user_decision = fields.Str(load_only = True)
+    user_decision = fields.Str(required = False, load_only = True)
 
 # We don't want to link outputs directly to a project
 # The link to the project is through the input label
@@ -94,5 +94,8 @@ class RefinedLabelCreateSchema(Schema):
 
 # Schema for editing Gemini repsonse or giving feedback
 class RefinedLabelUpdateSchema(Schema):
-    feedback = fields.Str(required = True, load_only = True, validate = validate.Length(min = 5, max = 500))
+    feedback = fields.Str(required = False, load_only = True, validate = validate.Length(min = 5, max = 500))
     generated_text = fields.Str(validate = validate.Length(min = 3, max = 5000))
+
+class LabelDecisionArgs(Schema):
+    user_decision = fields.Str(required = False)

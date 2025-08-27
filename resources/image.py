@@ -92,7 +92,7 @@ class ProjectImageUpload(MethodView):
             description = "Project not found or permission denied"
         )
 
-        if project.images.count() > MAX_IMAGES:
+        if project.images.count() >= MAX_IMAGES:
             abort(400, message = f"Maximum of {MAX_IMAGES} images already uploaded for this project")
 
         if "image" not in request.files:
@@ -142,7 +142,7 @@ class ProjectImageUpload(MethodView):
                 db.session.commit()
             except SQLAlchemyError as e:
                 db.session.rollback()
-                print(f"Database error while uploading image metadata for file {gcs_path}: {str(e.orig)}")
+                print(f"Database error while uploading image metadata for file {gcs_path}: {str(e)}")
                 _delete_file_from_gcs(gcs_path)
                 abort(500, message = "Database error occurred while saving image metadata. Rolled back successfully")
             
@@ -177,7 +177,6 @@ class ImageResource(MethodView):
         return image
 
     @jwt_required()
-    @blp.response(200, {"message": "Image deleted successfully."}) 
     def delete(self, image_id):
         # Delete a specific image (metadata from DB and file from GCS)
         current_user_id = get_jwt_identity()

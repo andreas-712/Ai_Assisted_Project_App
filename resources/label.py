@@ -12,7 +12,7 @@ from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 
 from db import db
 from models import ProjectModel, LabelModel, RefinedLabelModel
-from schemas import ProjectAddLabelsSchema, LabelSchema, RefinedLabelUpdateSchema, RefinedLabelSchema
+from schemas import ProjectAddLabelsSchema, LabelSchema, RefinedLabelUpdateSchema, RefinedLabelSchema, LabelDecisionArgs
 
 from resources.gemini import gemini_service_instance
 
@@ -48,7 +48,7 @@ class ProjectLabelsList(MethodView):
         )
 
         # Add 1-10 input labels
-        if (project.labels.count() + len(labels_data["labels"])) > MAX_LABELS:
+        if (project.labels.count() + len(labels_data["labels"])) >= MAX_LABELS:
             abort(400, message = f"Adding these labels would exceed limit of labels {MAX_LABELS} per project")
 
         created = []
@@ -65,9 +65,13 @@ class ProjectLabelsList(MethodView):
 class LabelResource(MethodView):
     
     @jwt_required()
-    @blp.arguments(LabelSchema, partial=("text", "project_id"))
+    @blp.arguments(LabelDecisionArgs)
     @blp.response(200, RefinedLabelSchema(many = True))
     def post(self, label_gen_data, label_id):
+        # If "Yes", generate, otherwise descriptions will not be generated with AI
+        # Default to no if decision not given
+        label_gen_data = label_gen_data or {}
+        gen_data = label_gen_data.get("user_decision", "No")
 
         current_user_id = get_jwt_identity()
 
@@ -81,10 +85,6 @@ class LabelResource(MethodView):
             )
             .first_or_404(description = "Label not found or access denied")
         )
-
-        # If "Yes", generate, otherwise descriptions will not be generated with AI
-        # Default to no if decision not given
-        gen_data = label_gen_data.get("user_decision", "No")
 
         # If user didn’t select "Yes", skip generation
         if gen_data != "Yes":
@@ -180,6 +180,9 @@ class RefinedLabelResource(MethodView):
     @blp.arguments(RefinedLabelUpdateSchema)
     @blp.response(200, RefinedLabelSchema)
     def patch(self, update_data, refined_id):
+        if not update_data:
+            abort(400, message = "No data provided")
+
         current_user_id = get_jwt_identity()
 
         refined = (
