@@ -19,10 +19,11 @@ from schemas import PlainImageSchema
 
 from google.cloud import storage
 
-# Allowed image file types
-ALLOWED_EXTENSIONS =  {'jpg', 'jpeg'}
 
 blp = Blueprint("images", __name__, description = "Operations on project images")
+# Allowed image file types
+ALLOWED_EXTENSIONS =  {'jpg', 'jpeg'}
+MAX_IMAGES = 3
 
 # Uploads a file object to the GCS bucket and returns the GCS path
 # Takes parameters file, file name, and file type
@@ -91,8 +92,8 @@ class ProjectImageUpload(MethodView):
             description = "Project not found or permission denied"
         )
 
-        if project.images.count() >= 3:
-            abort(400, message = "Maximum of 3 images already uploaded for this project")
+        if project.images.count() > MAX_IMAGES:
+            abort(400, message = f"Maximum of {MAX_IMAGES} images already uploaded for this project")
 
         if "image" not in request.files:
             abort(400, message = "No image file part in the request")

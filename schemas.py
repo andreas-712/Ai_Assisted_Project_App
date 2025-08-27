@@ -55,6 +55,8 @@ class LabelSchema(PlainLabelSchema):
     project = fields.Nested(PlainProjectSchema(), dump_only = True)
     # Refined label 1-1 relation, can show its refined label
     refinements = fields.List(fields.Nested(PlainRefinedLabelSchema(), dump_only = True))
+    # For user decision whether they want generated label descriptions
+    user_decision = fields.Str(load_only = True)
 
 # We don't want to link outputs directly to a project
 # The link to the project is through the input label
@@ -85,7 +87,7 @@ class ProjectAddLabelsSchema(Schema):
     )
 
 class RefinedLabelCreateSchema(Schema):
-    generated_text = fields.Str(required = True)
+    generated_text = fields.Str(allow_none = True)
     difficulty = fields.Str(required = True, validate=validate.OneOf(["simple", "intermediate", "in_depth"]))
     input_label_id = fields.Int(required = True, load_only = True)
 

@@ -11,12 +11,13 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 
 from db import db
-from models import ProjectModel 
+from models import ProjectModel, UserModel
 from schemas import ProjectSchema, PlainProjectSchema, ProjectUpdateSchema
 
 # Define the Blueprint for projects
 blp = Blueprint("projects", __name__, description = "Operations on projects")
 
+MAX_USER_PROJECTS = 5
 
 # Endpoint for generic create and view projects
 @blp.route("/projects")
@@ -29,6 +30,10 @@ class ProjectListAndCreate(MethodView):
         # Create a new project for the authenticated user
         current_user_id = get_jwt_identity()
         
+        user = UserModel.query.get_or_404(current_user_id)
+        if user.projects.count() > MAX_USER_PROJECTS:
+            abort(400, message = f"Limit of {MAX_USER_PROJECTS} projects per user reached")
+
         project = ProjectModel(user_id = current_user_id, **project_data)
         
         try:
