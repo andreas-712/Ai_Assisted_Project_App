@@ -11,7 +11,7 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 
 from db import db
-from models import ProjectModel, LabelModel, RefinedLabelModel
+from models import ProjectModel, LabelModel, RefinedLabelModel, UserModel
 from schemas import ProjectAddLabelsSchema, LabelSchema, RefinedLabelUpdateSchema, RefinedLabelSchema, LabelDecisionArgs
 
 from resources.gemini import gemini_service_instance
@@ -136,18 +136,12 @@ class LabelResource(MethodView):
             db.session.rollback()
             abort(500, message=f"Unexpected error: {e}")
 
-
-    @jwt_required()
     @blp.response(200, LabelSchema)
     def get(self, label_id):
-        # Find linked labels by user ID
-        current_user_id = get_jwt_identity()
-        # Ensure the label exists and belongs to a project owned by the current user
-        label = db.session.query(LabelModel).join(ProjectModel).filter(
-            LabelModel.id == label_id,
-            ProjectModel.user_id == current_user_id
-        ).first_or_404(description = "Label not found or access denied")
-
+        label = (
+            LabelModel.query
+            .get_or_404(label_id)
+        )
         return label
 
     @jwt_required()
@@ -176,6 +170,24 @@ class LabelResource(MethodView):
 @blp.route("/refined_labels/<int:refined_id>")
 class RefinedLabelResource(MethodView):
     
+    @jwt_required()
+    @blp.response(200, RefinedLabelSchema)
+    def get(self, refined_id):
+        current_user_id = get_jwt_identity()
+        refined_label_data = (
+            db.session.query(RefinedLabelModel)
+            .join(RefinedLabelModel.input_label)
+            .join(LabelModel.project)
+            .join(ProjectModel.user).filter(
+                RefinedLabelModel.id == refined_id,
+                UserModel.id == current_user_id
+            )
+            .first_or_404(description = "Refined label not found or access denied")
+        )
+
+        return refined_label_data
+    
+
     @jwt_required()
     @blp.arguments(RefinedLabelUpdateSchema)
     @blp.response(200, RefinedLabelSchema)

@@ -47,12 +47,12 @@ class ProjectListAndCreate(MethodView):
             abort(400, message = f"Database integrity error") 
         except SQLAlchemyError:
             db.session.rollback()
-            abort(500, message = f"An error occurred while creating the project")
+            abort(500, message = f"General database error occurred while creating the project")
             
         return project
     
-    # User login required -- easy check for their own projects
-    @jwt_required() 
+    # User login required: easy check for their own projects
+    @jwt_required
     # Can return many projects
     @blp.response(200, ProjectSchema(many=True))
     def get(self):
@@ -69,14 +69,11 @@ class ProjectListAndCreate(MethodView):
 # Endpoint related to a specific project
 @blp.route("/projects/<int:project_id>")
 class ProjectResource(MethodView):
-    @jwt_required()
     @blp.response(200, ProjectSchema)
     # Get specific project by the project ID
     def get(self, project_id):
-        current_user_id = get_jwt_identity()
-        # Get project, ensuring it belongs to user
         try:
-            project = ProjectModel.query.filter_by(id = project_id, user_id = current_user_id).first_or_404()
+            project = ProjectModel.query.filter_by(id = project_id).first_or_404()
             return project
         except SQLAlchemyError:
             abort(500, message = "Error, a problem occured retrieving projects")
