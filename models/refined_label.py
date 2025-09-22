@@ -14,3 +14,11 @@ class RefinedLabelModel(db.Model):
     input_label_id = db.Column(db.Integer, db.ForeignKey("labels.id"), nullable = False)
     # Matches "refined_label" in LabelModel
     input_label = db.relationship("LabelModel", back_populates = "refinements")
+    # Strictly enforce difficulty uniqueness per label
+    __table_args__ = (
+        db.UniqueConstraint(
+            "input_label_id",
+            "difficulty",
+            name="uq_label_difficulty"
+        ),
+    )

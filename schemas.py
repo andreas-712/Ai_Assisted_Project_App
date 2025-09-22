@@ -97,5 +97,16 @@ class RefinedLabelUpdateSchema(Schema):
     feedback = fields.Str(required = False, load_only = True, validate = validate.Length(min = 5, max = 500))
     generated_text = fields.Str(validate = validate.Length(min = 3, max = 5000))
 
-class LabelDecisionArgs(Schema):
-    user_decision = fields.Str(required = False)
+# Schema for generating label desciption (single difficulty and label)
+class LabelGenerateArgs(Schema):
+    input_difficulty = fields.Str(
+        load_default="simple",
+        validate=validate.OneOf(["simple", "intermediate", "in_depth"])
+    )
+# Schema for manually typing label description (single difficulty and label)
+class LabelManualArgs(Schema):
+    input_difficulty = fields.Str(
+        load_default="simple",
+        validate=validate.OneOf(["simple", "intermediate", "in_depth"])
+    )
+    input_text = fields.Str(required=True, validate=validate.Length(min=5))

@@ -11,8 +11,8 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 
 from db import db
-from models import ProjectModel, LabelModel, RefinedLabelModel, UserModel
-from schemas import ProjectAddLabelsSchema, LabelSchema, RefinedLabelUpdateSchema, RefinedLabelSchema, LabelDecisionArgs
+from models import ProjectModel, LabelModel, RefinedLabelModel
+from schemas import ProjectAddLabelsSchema, LabelSchema, RefinedLabelUpdateSchema, RefinedLabelSchema, LabelGenerateArgs, LabelManualArgs
 
 from resources.gemini import gemini_service_instance
 
@@ -60,18 +60,17 @@ class ProjectLabelsList(MethodView):
         db.session.commit()
         return created
     
-# Actions on specific labels
-@blp.route("/labels/<int:label_id>")
-class LabelResource(MethodView):
+# *** Actions on specific labels ***
+
+# Generate AI text, single difficulty (chosen)
+@blp.route("/labels/<int:label_id>/generate")
+class LabelGenerateResource(MethodView):
     
     @jwt_required()
-    @blp.arguments(LabelDecisionArgs)
-    @blp.response(200, RefinedLabelSchema(many = True))
+    @blp.arguments(LabelGenerateArgs)
+    @blp.response(200, RefinedLabelSchema)
     def post(self, label_gen_data, label_id):
-        # If "Yes", generate, otherwise descriptions will not be generated with AI
-        # Default to no if decision not given
-        label_gen_data = label_gen_data or {}
-        gen_data = label_gen_data.get("user_decision", "No")
+        input_difficulty = label_gen_data["input_difficulty"]
 
         current_user_id = get_jwt_identity()
 
@@ -86,41 +85,38 @@ class LabelResource(MethodView):
             .first_or_404(description = "Label not found or access denied")
         )
 
-        # If user didn’t select "Yes", skip generation
-        if gen_data != "Yes":
-            return RefinedLabelModel.query.filter_by(input_label_id=label.id).all()
+        difficulties = {"simple", "intermediate", "in_depth"}
 
-        difficulties = ["simple", "intermediate", "in_depth"]
+        # If backend makes mistake
+        if input_difficulty not in difficulties:
+            abort(400, message = "Error, please enter a valid difficulty (one of simple, intermediate, in_depth)")
 
+
+        # *** Generating the text ***
         try:
-            results = []
-            for difficulty in difficulties:
-                refined = RefinedLabelModel.query.filter_by(
-                    input_label_id=label.id, difficulty=difficulty
-                ).first()
+            refined = RefinedLabelModel.query.filter_by(
+                input_label_id=label.id, difficulty=input_difficulty
+            ).first()
 
-                refined_text_content = gemini_service_instance.refine_label_text(
-                    label_text=label.text,
-                    difficulty=difficulty,
-                    project_name=label.project.name if label.project else None,
-                    project_description=label.project.description if label.project else None,
+            refined_text_content = gemini_service_instance.refine_label_text(
+                label_text=label.text,
+                difficulty=input_difficulty,
+                project_name=label.project.name if label.project else None,
+                project_description=label.project.description if label.project else None,
                 )
 
-                if refined:
-                    refined.generated_text = refined_text_content
-                else:
-                    refined = RefinedLabelModel(
-                        generated_text=refined_text_content,
-                        difficulty=difficulty,
-                        input_label_id=label.id
-                    )
-                    db.session.add(refined)
+            if refined:
+                refined.generated_text = refined_text_content
+            else:
+                refined = RefinedLabelModel(
+                generated_text=refined_text_content,
+                difficulty=input_difficulty,
+                input_label_id=label.id
+                )
 
-                results.append(refined)
-
+            db.session.add(refined)
             db.session.commit()
-            return results
-
+            return refined
 
         # Catch errors from Gemini
         except ConnectionError as e_gemini:
@@ -128,14 +124,18 @@ class LabelResource(MethodView):
             abort(502, message=f"Error generating for label {label.text}: {str(e_gemini)}")
         except IntegrityError:
             db.session.rollback()
-            abort(400, message="Database integrity error while saving refined labels")
+            abort(400, message="Database integrity error while saving label description")
         except SQLAlchemyError:
             db.session.rollback()
-            abort(500, message="Database error while saving refined labels")
+            abort(500, message="Database error while saving label description")
         except Exception as e:
             db.session.rollback()
             abort(500, message=f"Unexpected error: {e}")
 
+
+# Gets the label contents of a specific label ID
+@blp.route("/labels/<int:label_id>")
+class LabelResource(MethodView):
     @blp.response(200, LabelSchema)
     def get(self, label_id):
         label = (
@@ -143,6 +143,72 @@ class LabelResource(MethodView):
             .get_or_404(label_id)
         )
         return label
+
+
+# For manually typing label descriptions
+@blp.route("/labels/<int:label_id>/manual")
+class LabelManualResource(MethodView):
+    
+    @jwt_required()
+    @blp.arguments(LabelManualArgs)
+    @blp.response(200, RefinedLabelSchema)
+    def post(self, text_data, label_id):
+        
+        # Fields (difficulty and text)
+        # Default to "simple" if difficulty not selected
+        input_difficulty = text_data["input_difficulty"]
+        input_text = text_data["input_text"].strip()
+
+        current_user_id = get_jwt_identity()
+
+        # Verify ownership of label through project
+        label = (
+            db.session.query(LabelModel)
+            .join(ProjectModel, LabelModel.project_id == ProjectModel.id)
+            .filter(
+                LabelModel.id == label_id,
+                ProjectModel.user_id == current_user_id
+            )
+            .first_or_404(description = "Label not found or access denied")
+        )
+
+        difficulties = {"simple", "intermediate", "in_depth"}
+
+        # If backend makes mistake
+        if input_difficulty not in difficulties:
+            abort(400, message = "Error, please enter a valid difficulty (one of simple, intermediate, in_depth)")
+
+        if len(input_text) < 5:
+            abort(400, message = "Error, please enter a label description longer than 5 characters")
+
+        try:
+            label_desc = RefinedLabelModel.query.filter_by(
+                input_label_id=label.id, difficulty=input_difficulty
+            ).first()
+
+            if label_desc:
+                label_desc.generated_text = input_text
+            else:
+                label_desc = RefinedLabelModel(
+                    generated_text=input_text,
+                    difficulty=input_difficulty,
+                    input_label_id=label.id
+                )
+
+            db.session.add(label_desc)
+            db.session.commit()
+            return label_desc
+        
+        except IntegrityError:
+            db.session.rollback()
+            abort(400, message="Database integrity error while saving label description")
+        except SQLAlchemyError:
+            db.session.rollback()
+            abort(500, message="Database error while saving label description")
+        except Exception as e:
+            db.session.rollback()
+            abort(500, message=f"Unexpected error: {e}")
+
 
     @jwt_required()
     def delete(self, label_id):
@@ -170,22 +236,15 @@ class LabelResource(MethodView):
 @blp.route("/refined_labels/<int:refined_id>")
 class RefinedLabelResource(MethodView):
     
-    @jwt_required()
     @blp.response(200, RefinedLabelSchema)
     def get(self, refined_id):
-        current_user_id = get_jwt_identity()
-        refined_label_data = (
+        refined_label = (
             db.session.query(RefinedLabelModel)
-            .join(RefinedLabelModel.input_label)
-            .join(LabelModel.project)
-            .join(ProjectModel.user).filter(
-                RefinedLabelModel.id == refined_id,
-                UserModel.id == current_user_id
-            )
-            .first_or_404(description = "Refined label not found or access denied")
+            .join(RefinedLabelModel.input_label)  # keep if you need eager fields; not for auth
+            .filter(RefinedLabelModel.id == refined_id)
+            .first_or_404(description="Refined label not found")
         )
-
-        return refined_label_data
+        return refined_label
     
 
     @jwt_required()
