@@ -30,7 +30,7 @@ def create_app(db_url = None):
         resources={r"/*": {
             "origins": [FRONTEND_URL],
             "supports_credentials": True,
-            "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+            "methods": ["GET", "POST", "DELETE", "PATCH", "OPTIONS", "PUT"],
             "allow_headers": ["Content-Type", "Authorization", "Accept"],
             "expose_headers": ["Content-Type", "Authorization"],
             "max_age": 86400
