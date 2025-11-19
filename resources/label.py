@@ -12,7 +12,7 @@ from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 
 from db import db
 from models import ProjectModel, LabelModel, RefinedLabelModel
-from schemas import ProjectAddLabelsSchema, LabelSchema, RefinedLabelUpdateSchema, RefinedLabelSchema, LabelGenerateArgs, LabelManualArgs
+from schemas import ProjectAddLabelsSchema, LabelSchema, FeedbackUpdateSchema, ManualUpdateSchema, RefinedLabelSchema, LabelGenerateArgs, LabelManualArgs
 
 from resources.gemini import gemini_service_instance
 
@@ -61,6 +61,39 @@ class ProjectLabelsList(MethodView):
         return created
     
 # *** Actions on specific labels ***
+
+@blp.route("/labels/<int:label_id>")
+class LabelResource(MethodView):
+
+    # Gets the label contents of a specific label ID
+    @blp.response(200, LabelSchema)
+    def get(self, label_id):
+        label = (
+            LabelModel.query
+            .get_or_404(label_id)
+        )
+        return label
+    
+    # Deletes the label contents of a specific label ID
+    @jwt_required()
+    def delete(self, label_id):
+        # Delete a specific label (and its associated refined_label)
+        current_user_id = get_jwt_identity()
+        # Ensure the label exists to a project and its user
+        label = db.session.query(LabelModel).join(ProjectModel).filter(
+            LabelModel.id == label_id,
+            ProjectModel.user_id == current_user_id
+        ).first_or_404(description = "Label not found or access denied")
+
+        try:
+            # Also deletes refined_label model due to cascade
+            db.session.delete(label) 
+            db.session.commit()
+        except SQLAlchemyError:
+            db.session.rollback()
+            abort(500, message = f"An error occurred while deleting the label")
+                    
+        return {"message": "Label deleted successfully"}
 
 # Generate AI text, single difficulty (chosen)
 @blp.route("/labels/<int:label_id>/generate")
@@ -133,17 +166,6 @@ class LabelGenerateResource(MethodView):
             abort(500, message=f"Unexpected error: {e}")
 
 
-# Gets the label contents of a specific label ID
-@blp.route("/labels/<int:label_id>")
-class LabelResource(MethodView):
-    @blp.response(200, LabelSchema)
-    def get(self, label_id):
-        label = (
-            LabelModel.query
-            .get_or_404(label_id)
-        )
-        return label
-
 
 # For manually typing label descriptions
 @blp.route("/labels/<int:label_id>/manual")
@@ -210,45 +232,29 @@ class LabelManualResource(MethodView):
             abort(500, message=f"Unexpected error: {e}")
 
 
-    @jwt_required()
-    def delete(self, label_id):
-        # Delete a specific label (and its associated refined_label)
-        current_user_id = get_jwt_identity()
-        # Ensure the label exists to a project and its user
-        label = db.session.query(LabelModel).join(ProjectModel).filter(
-            LabelModel.id == label_id,
-            ProjectModel.user_id == current_user_id
-        ).first_or_404(description = "Label not found or access denied")
+# *** Actions on label descriptions labels ***
 
-        try:
-            # Also deletes refined_label model due to cascade
-            db.session.delete(label) 
-            db.session.commit()
-        except SQLAlchemyError:
-            db.session.rollback()
-            abort(500, message = f"An error occurred while deleting the label")
-                    
-        return {"message": "Label deleted successfully"}
-    
-
-# For users to give short feedback, or to edit manually
-# Must only have either feedback OR edits in a single request
 @blp.route("/refined_labels/<int:refined_id>")
 class RefinedLabelResource(MethodView):
-    
+
+    # View a specific refined label
     @blp.response(200, RefinedLabelSchema)
     def get(self, refined_id):
         refined_label = (
             db.session.query(RefinedLabelModel)
-            .join(RefinedLabelModel.input_label)  # keep if you need eager fields; not for auth
+            .join(RefinedLabelModel.input_label) 
             .filter(RefinedLabelModel.id == refined_id)
             .first_or_404(description="Refined label not found")
         )
         return refined_label
-    
 
+
+# For users to give feedback, receiving an updated label description
+@blp.route("/refined_labels/<int:refined_id>/generate")
+class RefinedLabelResource(MethodView):
+    
     @jwt_required()
-    @blp.arguments(RefinedLabelUpdateSchema)
+    @blp.arguments(FeedbackUpdateSchema)
     @blp.response(200, RefinedLabelSchema)
     def patch(self, update_data, refined_id):
         if not update_data:
@@ -270,33 +276,69 @@ class RefinedLabelResource(MethodView):
         )
 
         has_feedback = "feedback" in update_data
-        has_text = "generated_text" in update_data
 
-        if not has_feedback and not has_text:
-            abort(400, message = "Provide feedback or generated_text")
-
-        if has_feedback and has_text:
-            abort(400, message = "Cannot provide both feedback and generated_text in the same request")
-
-        # Have user edit the text
-        if has_text:
-            refined.generated_text = update_data["generated_text"]
+        if not has_feedback:
+            abort(400, message = "Must provide feedback")
 
         # Have Gemini reconstruct the text
-        elif has_feedback:
-            try:
-                new_text = gemini_service_instance.reconstruct_label_text(
-                    old_output = refined.generated_text,
-                    user_feedback = update_data["feedback"],
-                    label_text = refined.input_label.text,
-                    difficulty = refined.difficulty
-                )
-                refined.generated_text = new_text
-            except ConnectionError as e:
-                abort(502, message=str(e))
+        try:
+            new_text = gemini_service_instance.reconstruct_label_text(
+                old_output = refined.generated_text,
+                user_feedback = update_data["feedback"],
+                label_text = refined.input_label.text,
+                difficulty = refined.difficulty
+            )
+            refined.generated_text = new_text
+        except ConnectionError as e:
+            abort(502, message=str(e))
 
-            # Overwrite the exisiting row in database
+        # Overwrite the exisiting row in database
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            abort(400, message = "Database integrity error updating label context")
+        except SQLAlchemyError:
+            db.session.rollback()
+            abort(500, message = "Database error updating label context")
 
+        return refined
+
+
+# For users to manually update / override exisiting an description
+@blp.route("/refined_labels/<int:refined_id>/manual")
+class RefinedLabelResource(MethodView):
+    # Manually update label description
+    @jwt_required()
+    @blp.arguments(ManualUpdateSchema)
+    @blp.response(200, RefinedLabelSchema)
+    def patch(self, update_data, refined_id):
+        if not update_data:
+            abort(400, message = "No data provided")
+
+        current_user_id = get_jwt_identity()
+
+        refined = (
+            db.session.query(RefinedLabelModel)
+            .join(LabelModel)
+            .join(ProjectModel)
+            .filter(
+                RefinedLabelModel.id == refined_id,
+                ProjectModel.user_id == current_user_id
+            )
+            .first_or_404(
+                description = "Not found or access denied."
+            )
+        )
+
+        has_text = "text" in update_data
+        if not has_text:
+            abort(400, message = "Updated text cannot be empty")
+
+        # Have user edit the text
+        refined.generated_text = update_data["text"]
+
+        # Overwrite the exisiting row in database
         try:
             db.session.commit()
         except IntegrityError:

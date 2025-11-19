@@ -92,10 +92,12 @@ class RefinedLabelCreateSchema(Schema):
     input_label_id = fields.Int(required = True, load_only = True)
 
 
-# Schema for editing Gemini repsonse or giving feedback
-class RefinedLabelUpdateSchema(Schema):
-    feedback = fields.Str(required = False, load_only = True, validate = validate.Length(min = 5, max = 500))
-    generated_text = fields.Str(validate = validate.Length(min = 3, max = 5000))
+# Schema for giving feedback
+class FeedbackUpdateSchema(Schema):
+    feedback = fields.Str(required = True, load_only = True, validate = validate.Length(min = 5, max = 500))
+    
+class ManualUpdateSchema(Schema):
+    text = fields.Str(required = True, validate = validate.Length(min = 3, max = 5000))
 
 # Schema for generating label desciption (single difficulty and label)
 class LabelGenerateArgs(Schema):
